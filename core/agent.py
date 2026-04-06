@@ -1,20 +1,17 @@
 import os
-import asyncio
-import sys
 from typing import Dict, List
-
-# 将 tools 目录加入路径
-sys.path.append(os.path.join(os.path.dirname(__file__), "tools"))
-
-from translator.workflow import app as translation_app, format_time
-from translator.voiceover import VoiceOverManager
-from capcut.manager import CapCutManager
 from langchain_core.messages import HumanMessage
+from core.workflow import app as translation_app, format_time
+from tools.voiceover import VoiceOverManager
+from tools.capcut import CapCutManager
 
 class VideoLocalizeAgent:
-    def __init__(self):
+    def __init__(self, output_dir="output"):
         self.capcut = CapCutManager()
         self.voiceover = VoiceOverManager()
+        self.output_dir = output_dir
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
 
     async def run(self, video_id: str, options: Dict = None):
         """执行完整的本地化流程"""
@@ -37,7 +34,7 @@ class VideoLocalizeAgent:
             return
 
         # 2. 生成 SRT 文件
-        srt_path = f"subtitle_{video_id}.srt"
+        srt_path = os.path.join(self.output_dir, f"subtitle_{video_id}.srt")
         with open(srt_path, "w", encoding="utf-8") as f:
             for idx, item in enumerate(srt_items, start=1):
                 f.write(f"{idx}\n")
@@ -46,10 +43,11 @@ class VideoLocalizeAgent:
         print(f"✅ SRT 文件已生成: {srt_path}")
 
         # 3. 生成配音 (可选)
+        voice_path = None
         if options.get("generate_voice"):
             print("\n--- 步骤 2: 生成印尼语配音 ---")
             full_text = " ".join([item['text'] for item in srt_items if item['text']])
-            voice_path = f"voice_{video_id}.mp3"
+            voice_path = os.path.join(self.output_dir, f"voice_{video_id}.mp3")
             await self.voiceover.text_to_speech(full_text, voice_path)
             print(f"✅ 配音文件已生成: {voice_path}")
 
@@ -63,7 +61,6 @@ class VideoLocalizeAgent:
                 if content:
                     texts = self.capcut.extract_texts(content)
                     print(f"📝 提取到 {len(texts)} 条文本素材。")
-                    print(f"💡 提示: 已准备好替换逻辑，但由于部分版本加密，请确认是否能直接注入。")
                 else:
                     print("⚠️ 无法读取草稿内容（可能已加密或格式不支持）。")
                     print(f"💡 请手动将 {srt_path} 导入剪映。")
@@ -73,13 +70,5 @@ class VideoLocalizeAgent:
         print("\n🎉 [Agent] 任务完成！")
         return {
             "srt": srt_path,
-            "voice": voice_path if options.get("generate_voice") else None
+            "voice": voice_path
         }
-
-if __name__ == "__main__":
-    # 使用示例
-    import sys
-    video_id = sys.argv[1] if len(sys.argv) > 1 else "dQw4w9WgXcQ"
-    
-    agent = VideoLocalizeAgent()
-    asyncio.run(agent.run(video_id))
