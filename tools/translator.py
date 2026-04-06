@@ -19,7 +19,18 @@ class SubtitleTranslator:
         for i in range(0, len(raw_data), batch_size):
             batch = raw_data[i : i + batch_size]
             for entry in batch:
-                clean_text = self.clean_text(entry.get('text', ''))
+                # 兼容字典和对象两种访问方式
+                if isinstance(entry, dict):
+                    original_text = entry.get('text', '')
+                    start = entry.get('start', 0)
+                    duration = entry.get('duration', 0)
+                else:
+                    # 如果是 FetchedTranscriptSnippet 对象
+                    original_text = getattr(entry, 'text', '')
+                    start = getattr(entry, 'start', 0)
+                    duration = getattr(entry, 'duration', 0)
+
+                clean_text = self.clean_text(original_text)
                 
                 if not clean_text:
                     translated_text = ""
@@ -30,8 +41,8 @@ class SubtitleTranslator:
                         translated_text = clean_text # 失败保底
                 
                 translated_data.append({
-                    'start': entry['start'],
-                    'end': entry['start'] + entry.get('duration', 0),
+                    'start': start,
+                    'end': start + duration,
                     'text': translated_text
                 })
             time.sleep(0.5)
