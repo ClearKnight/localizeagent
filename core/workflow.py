@@ -46,8 +46,8 @@ def translate_to_srt_node(state: GraphState):
     if not raw_data:
         return {"messages": [AIMessage(content="无字幕数据")]}
     
-    print(f"\n[2/2] 开始 SRT 逐行翻译（MyMemory 引擎）...")
-    translator = SubtitleTranslator(source='english', target='indonesian')
+    print(f"\n[2/2] 开始 SRT 逐行翻译（Google 引擎）...")
+    translator = SubtitleTranslator(source='en', target='id')
     
     start_time_total = time.time()
     translated_data = translator.translate_batch(raw_data)
