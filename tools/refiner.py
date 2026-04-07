@@ -57,13 +57,19 @@ Refined:"""
             return machine
 
     def refine_batch(self, original_texts: List[str], machine_translations: List[str], max_workers: int = 5) -> List[str]:
-        """并行润色"""
+        """并行润色，并针对免费 API 进行频率限制控制"""
         if not self.api_key:
             print("⚠️ 未配置 API Key，将跳过 LLM 润色步骤。")
             return machine_translations
 
         total = len(original_texts)
         refined_results = [None] * total
+        
+        # 如果是 Gemini 免费层级 (15 RPM)，我们降低并发并增加间隔
+        is_free_tier = "gemini" in self.base_url.lower() or "free" in self.model.lower()
+        if is_free_tier:
+            print("   ℹ️ 检测到可能是免费 API，启用频率保护模式 (15 RPM)...")
+            max_workers = 1 # 免费层级建议单线程以防封禁
         
         print(f"   🚀 云端并行润色中 (并发: {max_workers})...")
         
@@ -78,6 +84,11 @@ Refined:"""
                 index = future_to_index[future]
                 refined_results[index] = future.result()
                 completed += 1
+                
+                # 针对免费 API 增加强制间隔
+                if is_free_tier and completed < total:
+                    time.sleep(4) # 60s / 15RPM = 4s/req
+                
                 percent = (completed / total) * 100
                 print(f"\r   润色进度: [{'#' * int(percent // 5)}{'.' * (20 - int(percent // 5))}] {percent:.1f}% ({completed}/{total})", end="", flush=True)
         
