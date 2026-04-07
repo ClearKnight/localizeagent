@@ -27,7 +27,9 @@ class VideoLocalizeAgent:
         print("\n--- 步骤 1: 翻译字幕 ---")
         inputs = {"messages": [HumanMessage(content=video_id)], "video_id": video_id}
         final_state = translation_app.invoke(inputs)
-        srt_items = final_state.get("translated_transcript", [])
+        
+        # 优先使用润色后的字幕，如果没有则使用机翻
+        srt_items = final_state.get("refined_transcript") or final_state.get("translated_transcript", [])
         
         if not srt_items:
             print("❌ 翻译失败，流程终止。")

@@ -6,12 +6,14 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 
 from tools.youtube import YouTubeFetcher
 from tools.translator import SubtitleTranslator
+from tools.refiner import TranslationRefiner
 
 # 1. 定义状态
 class GraphState(MessagesState):
     video_id: str
     raw_transcript: List[Dict]  # 存储带时间戳的原始数据
-    translated_transcript: List[Dict] # 存储带时间戳的译文数据
+    translated_transcript: List[Dict] # 存储带时间戳的机翻数据
+    refined_transcript: List[Dict] # 存储带时间戳的微调后数据
 
 # 2. 工具函数：秒转 SRT 时间格式 (00:00:00,000)
 def format_time(seconds: float) -> str:
@@ -57,7 +59,51 @@ def translate_to_srt_node(state: GraphState):
     
     return {
         "translated_transcript": translated_data,
-        "messages": [AIMessage(content="SRT 数据处理完成")]
+        "messages": [AIMessage(content="机翻完成")]
+    }
+
+def refine_translation_node(state: GraphState):
+    """使用 LLM 对机翻结果进行微调和润色"""
+    raw_data = state.get("raw_transcript", [])
+    machine_data = state.get("translated_transcript", [])
+    
+    if not machine_data:
+        return {"messages": [AIMessage(content="跳过润色")]}
+    
+    print(f"\n[3/3] 开始 LLM 专家级微调（基于 Ollama 7B）...")
+    
+    refiner = TranslationRefiner()
+    
+    # 提取原文和机翻结果
+    orig_texts = []
+    for e in raw_data:
+        if isinstance(e, dict):
+            orig_texts.append(e.get('text', ''))
+        else:
+            orig_texts.append(getattr(e, 'text', ''))
+            
+    machine_texts = [e['text'] for e in machine_data]
+    
+    start_time = time.time()
+    # 这里的 refine_batch 内部是逐条请求 Ollama 的
+    # 如果 Ollama 没开，它会瞬间返回机翻结果
+    refined_texts = refiner.refine_batch(orig_texts, machine_texts)
+    
+    # 将润色后的文本重新组装
+    refined_data = []
+    for i, entry in enumerate(machine_data):
+        refined_data.append({
+            'start': entry['start'],
+            'end': entry['end'],
+            'text': refined_texts[i]
+        })
+        
+    elapsed = time.time() - start_time
+    print(f"✅ LLM 微调完成！耗时: {elapsed:.2f} 秒")
+    
+    return {
+        "refined_transcript": refined_data,
+        "messages": [AIMessage(content="字幕润色完成")]
     }
 
 # 4. 构建工作流
@@ -65,10 +111,12 @@ def create_workflow():
     workflow = StateGraph(GraphState)
     workflow.add_node("fetch", fetch_subtitle_node)
     workflow.add_node("translate", translate_to_srt_node)
+    workflow.add_node("refine", refine_translation_node)
 
     workflow.add_edge(START, "fetch")
     workflow.add_edge("fetch", "translate")
-    workflow.add_edge("translate", END)
+    workflow.add_edge("translate", "refine")
+    workflow.add_edge("refine", END)
     return workflow.compile()
 
 app = create_workflow()
