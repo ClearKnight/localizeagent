@@ -1,60 +1,84 @@
 import json
 import requests
 from typing import List, Dict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class TranslationRefiner:
-    def __init__(self, model="qwen2.5:7b", base_url="http://localhost:11434"):
+    def __init__(self, api_key=None, base_url="https://api.deepseek.com", model="deepseek-chat"):
+        """
+        使用云端 LLM (兼容 OpenAI 格式) 对机翻结果进行微调和润色
+        推荐: DeepSeek-V3, GPT-4o-mini
+        """
+        self.api_key = api_key
+        self.base_url = f"{base_url.rstrip('/')}/chat/completions"
         self.model = model
-        self.base_url = f"{base_url}/api/generate"
 
-    def refine_batch(self, original_texts: List[str], machine_translations: List[str]) -> List[str]:
-        """
-        使用 LLM 对机翻结果进行微调和润色
-        """
-        refined_results = []
+    def refine_single(self, orig: str, machine: str) -> str:
+        """单条润色逻辑"""
+        if not self.api_key:
+            return machine # 无 Key 则回退
+            
+        if not orig.strip():
+            return ""
+
+        prompt = f"""You are a professional subtitle reviewer for English-Indonesian video localization.
+Task: Refine the provided [Google Machine Translation] based on the [Original English].
+
+Guidelines:
+1. Fix grammatical errors and unnatural phrasing in Indonesian.
+2. Ensure the tone matches the video context (usually natural and conversational).
+3. Keep it concise for subtitle display (avoid overly long lines).
+4. If the machine translation is already perfect, keep it as is.
+
+[Original English]: {orig}
+[Google Machine Translation]: {machine}
+
+Output ONLY the refined [Indonesian Translation] without any explanation.
+Refined:"""
+
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "stream": False
+            }
+            response = requests.post(self.base_url, headers=headers, json=payload, timeout=10)
+            if response.status_code == 200:
+                refined_text = response.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                return refined_text.replace('"', '').replace('「', '').replace('」', '')
+            return machine
+        except:
+            return machine
+
+    def refine_batch(self, original_texts: List[str], machine_translations: List[str], max_workers: int = 5) -> List[str]:
+        """并行润色"""
+        if not self.api_key:
+            print("⚠️ 未配置 API Key，将跳过 LLM 润色步骤。")
+            return machine_translations
+
+        total = len(original_texts)
+        refined_results = [None] * total
         
-        # 为了效率，我们分小批次处理，或者单条处理以保证精准度
-        # 这里采用单条处理逻辑，方便模型对比原文和译文
-        for orig, machine in zip(original_texts, machine_translations):
-            if not orig.strip():
-                refined_results.append("")
-                continue
-                
-            prompt = f"""你是一位精通英语和印尼语的专业视频字幕审校专家。
-请根据提供的【英文原文】和【Google机翻结果】，对机翻结果进行微调。
-
-你的任务：
-1. 修正语法错误和不地道的表达。
-2. 确保语气符合视频语境（通常为自然、口语化）。
-3. 严格控制长度，使其简洁有力，适合作为字幕。
-4. 如果机翻已经非常完美，则保持不变。
-
-【英文原文】：{orig}
-【Google机翻结果】：{machine}
-
-请直接输出微调后的【印尼语译文】，不要包含任何解释或额外文字。
-微调后的译文："""
-
-            try:
-                response = requests.post(
-                    self.base_url,
-                    json={
-                        "model": self.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {"temperature": 0.3}
-                    },
-                    timeout=10
-                )
-                if response.status_code == 200:
-                    refined_text = response.json().get("response", "").strip()
-                    # 去掉可能存在的引号
-                    refined_text = refined_text.replace('"', '').replace('「', '').replace('」', '')
-                    refined_results.append(refined_text)
-                else:
-                    refined_results.append(machine) # 失败则回退到机翻
-            except Exception as e:
-                # print(f"⚠️ 润色节点连接失败 (Ollama 可能未启动): {e}")
-                refined_results.append(machine) # 失败则回退到机翻
-                
+        print(f"   🚀 云端并行润色中 (并发: {max_workers})...")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(self.refine_single, orig, machine): i 
+                for i, (orig, machine) in enumerate(zip(original_texts, machine_translations))
+            }
+            
+            completed = 0
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                refined_results[index] = future.result()
+                completed += 1
+                percent = (completed / total) * 100
+                print(f"\r   润色进度: [{'#' * int(percent // 5)}{'.' * (20 - int(percent // 5))}] {percent:.1f}% ({completed}/{total})", end="", flush=True)
+        
+        print("\n")
         return refined_results

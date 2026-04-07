@@ -63,16 +63,23 @@ def translate_to_srt_node(state: GraphState):
     }
 
 def refine_translation_node(state: GraphState):
-    """使用 LLM 对机翻结果进行微调和润色"""
+    """使用云端 LLM 对机翻结果进行微调和润色"""
     raw_data = state.get("raw_transcript", [])
     machine_data = state.get("translated_transcript", [])
     
-    if not machine_data:
+    # 尝试从环境变量或配置中获取 Key
+    api_key = os.getenv("LLM_API_KEY")
+    base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
+    model = os.getenv("LLM_MODEL", "deepseek-chat")
+
+    if not machine_data or not api_key:
+        if not api_key:
+            print("\n💡 提示: 未检测到 LLM_API_KEY，将跳过专家润色步骤，直接使用机翻结果。")
         return {"messages": [AIMessage(content="跳过润色")]}
     
-    print(f"\n[3/3] 开始 LLM 专家级微调（基于 Ollama 7B）...")
+    print(f"\n[3/3] 开始云端专家级微调 ({model})...")
     
-    refiner = TranslationRefiner()
+    refiner = TranslationRefiner(api_key=api_key, base_url=base_url, model=model)
     
     # 提取原文和机翻结果
     orig_texts = []
