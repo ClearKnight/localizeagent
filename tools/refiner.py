@@ -4,7 +4,7 @@ from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class TranslationRefiner:
-    def __init__(self, api_key=None, base_url="https://api.deepseek.com", model="deepseek-chat"):
+    def __init__(self, api_key=None, base_url="https://api.deepseek.com", model="deepseek-chat", temperature=0.3):
         """
         使用云端 LLM (兼容 OpenAI 格式) 对机翻结果进行微调和润色
         推荐: DeepSeek-V3, GPT-4o-mini
@@ -12,6 +12,7 @@ class TranslationRefiner:
         self.api_key = api_key
         self.base_url = f"{base_url.rstrip('/')}/chat/completions"
         self.model = model
+        self.temperature = float(temperature)
 
     def refine_single(self, orig: str, machine: str) -> str:
         """单条润色逻辑"""
@@ -44,7 +45,7 @@ Refined:"""
             payload = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
+                "temperature": self.temperature,
                 "stream": False
             }
             response = requests.post(self.base_url, headers=headers, json=payload, timeout=10)

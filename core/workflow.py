@@ -71,15 +71,16 @@ def refine_translation_node(state: GraphState):
     api_key = os.getenv("LLM_API_KEY")
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
     model = os.getenv("LLM_MODEL", "deepseek-chat")
+    temperature = os.getenv("LLM_TEMPERATURE", 0.3)
 
     if not machine_data or not api_key:
         if not api_key:
             print("\n💡 提示: 未检测到 LLM_API_KEY，将跳过专家润色步骤，直接使用机翻结果。")
         return {"messages": [AIMessage(content="跳过润色")]}
     
-    print(f"\n[3/3] 开始云端专家级微调 ({model})...")
+    print(f"\n[3/3] 开始云端专家级微调 ({model}, temp={temperature})...")
     
-    refiner = TranslationRefiner(api_key=api_key, base_url=base_url, model=model)
+    refiner = TranslationRefiner(api_key=api_key, base_url=base_url, model=model, temperature=temperature)
     
     # 提取原文和机翻结果
     orig_texts = []
