@@ -18,7 +18,8 @@ class VideoLocalizeAgent:
         options = options or {
             "generate_srt": True,
             "generate_voice": True,
-            "inject_capcut": True
+            "inject_capcut": True,
+            "target_draft_path": None
         }
 
         print(f"🚀 [Agent] 开始处理视频: {video_id}")
@@ -55,22 +56,47 @@ class VideoLocalizeAgent:
 
         # 4. 寻找剪映草稿
         if options.get("inject_capcut"):
-            print("\n--- 步骤 3: 检查剪映草稿 ---")
-            latest = self.capcut.get_latest_draft()
-            if latest:
-                print(f"📂 发现最近草稿: {latest['name']}")
-                content = self.capcut.read_draft_content(latest['path'])
-                if content:
-                    texts = self.capcut.extract_texts(content)
-                    print(f"📝 提取到 {len(texts)} 条文本素材。")
+            print("\n--- 步骤 3: 自动导入剪映 ---")
+            
+            target_draft_path = options.get("target_draft_path")
+            
+            if target_draft_path:
+                # 方案 A: 自动注入 (针对已有字幕轨道的项目)
+                success = self.capcut.inject_subtitles(target_draft_path, srt_items)
+                
+                # 方案 B: 素材夹同步 (将产物直接放入剪映项目的 Resources 目录，方便手动一键拖入)
+                self._import_to_resources(target_draft_path, srt_path, voice_path)
+                
+                if success:
+                    print(f"✨ 字幕已成功注入轨道！")
                 else:
-                    print("⚠️ 无法读取草稿内容（可能已加密或格式不支持）。")
-                    print(f"💡 请手动将 {srt_path} 导入剪映。")
+                    print(f"💡 注入轨道未完成（可能是空项目），但素材已放入项目文件夹，请在剪映中直接拖入。")
             else:
-                print("📭 未发现任何剪映草稿。")
+                print("📭 未选择任何剪映草稿，跳过导入。")
 
         print("\n🎉 [Agent] 任务完成！")
         return {
             "srt": srt_path,
             "voice": voice_path
         }
+
+    def _import_to_resources(self, draft_path, srt_path, voice_path):
+        """将生成的素材物理复制到剪映项目的 Resources 目录"""
+        try:
+            res_dir = os.path.join(draft_path, "Resources")
+            if not os.path.exists(res_dir):
+                os.makedirs(res_dir)
+            
+            # 复制 SRT
+            dest_srt = os.path.join(res_dir, os.path.basename(srt_path))
+            import shutil
+            shutil.copy2(srt_path, dest_srt)
+            
+            # 复制 MP3
+            if voice_path:
+                dest_voice = os.path.join(res_dir, os.path.basename(voice_path))
+                shutil.copy2(voice_path, dest_voice)
+            
+            print(f"📂 素材已物理同步至剪映资源库: {os.path.basename(draft_path)}/Resources/")
+        except Exception as e:
+            print(f"⚠️ 素材同步失败: {e}")

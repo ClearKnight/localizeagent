@@ -94,6 +94,92 @@ class CapCutManager:
             })
         return texts
 
+    def inject_subtitles(self, draft_path, srt_items):
+        """
+        核心注入逻辑：将 SRT 内容注入剪映草稿
+        """
+        print(f"🛠️ 开始注入字幕到: {draft_path}")
+        
+        # 1. 定位内容文件
+        target_file = None
+        project_path = os.path.join(draft_path, "Timelines", "project.json")
+        
+        if os.path.exists(project_path):
+            with open(project_path, "r", encoding="utf-8") as f:
+                project_data = json.load(f)
+            for timeline in project_data.get("timelines", []):
+                timeline_id = timeline.get("id")
+                possible_paths = [
+                    os.path.join(draft_path, "Timelines", timeline_id, "draft_content.json"),
+                    os.path.join(draft_path, "Timelines", timeline_id, "template.tmp")
+                ]
+                for p in possible_paths:
+                    if os.path.exists(p):
+                        target_file = p
+                        break
+                if target_file: break
+        
+        if not target_file:
+            # 尝试根目录
+            root_content = os.path.join(draft_path, "draft_content.json")
+            if os.path.exists(root_content):
+                target_file = root_content
+
+        if not target_file:
+            print("❌ 错误：未找到可注入的内容文件。")
+            return False
+
+        # 2. 备份
+        backup_file = target_file + ".bak"
+        shutil.copy2(target_file, backup_file)
+        print(f"📦 已备份原始文件到: {os.path.basename(backup_file)}")
+
+        # 3. 读取并修改
+        try:
+            with open(target_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # 获取所有文本素材
+            texts = data.get("materials", {}).get("texts", [])
+            if not texts:
+                print("⚠️ 警告：项目中没有预设的文本轨道，请先在剪映中手动添加一段占位字幕。")
+                return False
+
+            # 4. 匹配并替换
+            # 这里采用最简单的策略：按顺序替换存在的文本框
+            # 进阶策略：根据时间戳匹配（待后续迭代）
+            print(f"📝 正在替换 {min(len(texts), len(srt_items))} 条字幕内容...")
+            
+            for i in range(min(len(texts), len(srt_items))):
+                # 剪映的 content 是富文本格式，包含 <size>, <color> 等标签
+                # 我们采用正则保留标签，仅替换纯文字内容
+                old_content = texts[i]["content"]
+                new_text = srt_items[i]["text"]
+                
+                # 简单的替换逻辑（如果原内容是简单的文本）
+                # 注意：剪映的 content 结构较复杂，这里先尝试直接替换核心文本部分
+                import re
+                # 匹配 [content] 标签内的内容，或者直接替换整个 content（如果不是富文本）
+                if "<" in old_content and ">" in old_content:
+                    # 尝试保留富文本标签，只替换文字
+                    # 这是一个简化的正则，实际可能更复杂
+                    texts[i]["content"] = re.sub(r'(?<=<.*?>)([^<>]+?)(?=<.*?>)', new_text, old_content)
+                else:
+                    texts[i]["content"] = new_text
+
+            # 5. 保存回文件
+            with open(target_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            
+            print(f"✅ 成功！请重新打开剪映项目查看效果。")
+            return True
+
+        except Exception as e:
+            print(f"❌ 注入过程中发生错误: {str(e)}")
+            # 还原备份
+            shutil.copy2(backup_file, target_file)
+            return False
+
 if __name__ == "__main__":
     manager = CapCutManager()
     latest = manager.get_latest_draft()
